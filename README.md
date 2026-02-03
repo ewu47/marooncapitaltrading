@@ -4,6 +4,7 @@
 - Alpaca paper-data download + cleaning helpers
 - A paper-trading runner that submits orders through Alpaca
 - A lightweight backtester with market data gateway, order book, order manager, and matching engine
+- Monte Carlo backtesting: execution randomness (fill/partial/cancel) and/or synthetic GBM price paths
 - Automatic trade logging to `logs/trades.csv` and `logs/system.log`
 - Built-in strategies:
   - **MovingAverageStrategy** (`ma`) - Simple moving average crossover
@@ -106,6 +107,44 @@ python run_backtest.py --csv data/AAPL_1Min_stock_alpaca_clean.csv --strategy ma
 
 ---
 
+## Monte Carlo Backtesting
+
+Monte Carlo backtesting runs many simulations to see how strategy performance varies under randomness:
+
+- **Execution MC** – Same CSV, N runs. The matching engine’s fill/partial/cancel randomness changes each run → distribution of PnL, Sharpe, max drawdown, win rate.
+- **Price-path MC** – N synthetic GBM price paths. Each path is one backtest; execution randomness also varies per run.
+
+**Module:** `monte_carlo.py` – Core library with `run_execution_mc()`, `run_price_path_mc()`, `run_custom_mc()`, and `print_mc_summary()`.
+
+**CLI runner:** `run_monte_carlo copy.py`
+
+### Execution mode (same CSV, multiple runs)
+
+```bash
+python "run_monte_carlo copy.py" --mode execution --csv data/AAPL_1Min_stock_alpaca_clean.csv --strategy ma --runs 100
+```
+
+### Price-path mode (synthetic GBM paths)
+
+```bash
+python "run_monte_carlo copy.py" --mode price_path --strategy ma --paths 50 --n-bars 500 --seed-base 42
+```
+
+### Key options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--mode` | execution | `execution` or `price_path` |
+| `--csv` | — | CSV path (required for execution mode) |
+| `--strategy` | ma | Strategy name |
+| `--runs` | 100 | Execution MC: number of runs |
+| `--paths` | 50 | Price-path MC: number of synthetic paths |
+| `--n-bars` | 500 | Price-path: bars per path |
+| `--seed-base` | — | Price-path: RNG seed (for reproducibility) |
+| `--capital` | 50000 | Initial capital |
+
+---
+
 ## Build Your Own Strategy
 
 Edit `strategies/strategy_base.py` and add your class:
@@ -163,6 +202,8 @@ trading-system/
   data/           # Market data CSVs
   run_live.py     # Live trading CLI
   run_backtest.py # Backtesting CLI
+  monte_carlo.py  # Monte Carlo backtesting library
+  run_monte_carlo copy.py  # Monte Carlo CLI runner
 ```
 
 ## Fetch data with Alpaca
@@ -214,7 +255,9 @@ strategies/
 data/
 notebooks/
 .env
+monte_carlo.py
 run_backtest.py
 run_live.py
+run_monte_carlo copy.py
 test_system.py
 ```
