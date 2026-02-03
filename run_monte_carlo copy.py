@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from core.monte_carlo import (
+from monte_carlo import (
     run_execution_mc,
     run_price_path_mc,
     print_mc_summary,
