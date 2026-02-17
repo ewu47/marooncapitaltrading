@@ -10,6 +10,28 @@
   - **MovingAverageStrategy** (`ma`) - Simple moving average crossover
   - **TemplateStrategy** (`template`) - Momentum-based starter template
   - **CryptoTrendStrategy** (`crypto_trend`) - EMA trend follower for crypto (long-only)
+  - **DemoStrategy** (`demo`) - Minimal demo strategy for testing
+  - **ATRBreakoutStrategy** (`atr_breakout`) - ATR-adjusted high/low breakout
+  - **ATRBreakoutOptimizedStrategy** (`atr_optimized`) - ATR breakout with trend/volume filters and trailing stop
+  - **ATRBreakoutKellyStrategy** (`atr_kelly`) - ATR breakout with Kelly-lite volatility-adjusted sizing
+  - **ATRBreakoutAdaptiveStrategy** (`atr_adaptive`) - ATR breakout with dynamic multiplier based on ATR z-score
+  - **ATRBreakoutAdaptiveKellyStrategy** (`atr_adaptive_kelly`) - Adaptive multiplier + Kelly sizing (best overall)
+
+## Strategy Performance Notes
+
+| Strategy | Best Timeframe | Best Market | Notes |
+|----------|---------------|-------------|-------|
+| `atr_breakout` | 1-min | Stocks | Solid baseline; roughly equal returns to ATR Kelly on 1-min data |
+| `atr_kelly` | 1-min | Stocks | Kelly sizing scales well on 1-min; approximately equal returns to base ATR breakout |
+| `atr_adaptive_kelly` | 5-min+ | High-volatility (crypto) | Best performer on longer timeframes and volatile markets like BTC, ETH, SOL |
+| `atr_optimized` | — | — | Underperforms in practice; filters over-suppress signals |
+| `atr_adaptive` | — | — | Adaptive bands help, but without Kelly sizing the edge is limited |
+| `ma` | — | — | Too slow for intraday; frequent whipsaws on 1-min/5-min data |
+| `template` | — | — | Starter template; not tuned for live performance |
+| `crypto_trend` | — | — | Basic EMA crossover; outperformed by ATR variants on the same crypto data |
+| `demo` | — | — | For testing only |
+
+**Key takeaway:** For 1-minute stock data, `atr_breakout` and `atr_kelly` deliver approximately equal returns. For longer timeframes (5-min+) and high-volatility markets like crypto, `atr_adaptive_kelly` is the best-performing strategy — the adaptive multiplier widens bands in volatile regimes to avoid false breakouts, while Kelly sizing scales positions appropriately.
 
 ## Quick Start
 

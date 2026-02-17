@@ -7,6 +7,11 @@ from typing import Dict, Type
 
 from . import strategy_base
 from .strategy_base import (
+    ATRBreakoutAdaptiveKellyStrategy,
+    ATRBreakoutAdaptiveStrategy,
+    ATRBreakoutKellyStrategy,
+    ATRBreakoutOptimizedStrategy,
+    ATRBreakoutStrategy,
     CryptoTrendStrategy,
     DemoStrategy,
     MovingAverageStrategy,
@@ -32,6 +37,15 @@ def _build_registry() -> Dict[str, Type[Strategy]]:
     registry.setdefault("crypto_trend_ema", CryptoTrendStrategy)
     registry.setdefault("demo", DemoStrategy)
     registry.setdefault("fast", DemoStrategy)
+    registry.setdefault("atr_breakout", ATRBreakoutStrategy)
+    registry.setdefault("atr_optimized", ATRBreakoutOptimizedStrategy)
+    registry.setdefault("atr_breakout_optimized", ATRBreakoutOptimizedStrategy)
+    registry.setdefault("atr_kelly", ATRBreakoutKellyStrategy)
+    registry.setdefault("atr_breakout_kelly", ATRBreakoutKellyStrategy)
+    registry.setdefault("atr_adaptive", ATRBreakoutAdaptiveStrategy)
+    registry.setdefault("atr_breakout_adaptive", ATRBreakoutAdaptiveStrategy)
+    registry.setdefault("atr_adaptive_kelly", ATRBreakoutAdaptiveKellyStrategy)
+    registry.setdefault("atr_breakout_adaptive_kelly", ATRBreakoutAdaptiveKellyStrategy)
     return registry
 
 
@@ -58,6 +72,11 @@ __all__ = [
     "MovingAverageStrategy",
     "CryptoTrendStrategy",
     "DemoStrategy",
+    "ATRBreakoutStrategy",
+    "ATRBreakoutOptimizedStrategy",
+    "ATRBreakoutKellyStrategy",
+    "ATRBreakoutAdaptiveStrategy",
+    "ATRBreakoutAdaptiveKellyStrategy",
     "get_strategy_class",
     "list_strategies",
 ]

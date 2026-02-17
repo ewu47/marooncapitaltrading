@@ -86,11 +86,11 @@ class OrderBook:
             best_bid.qty -= qty
             best_ask.qty -= qty
 
-            if best_bid.qty == 0:
+            if best_bid.qty <= 0:
                 heapq.heappop(self.bids)
                 self.order_map.pop(best_bid.order_id, None)
 
-            if best_ask.qty == 0:
+            if best_ask.qty <= 0:
                 heapq.heappop(self.asks)
                 self.order_map.pop(best_ask.order_id, None)
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from core.backtester import Backtester, PerformanceAnalyzer
@@ -30,6 +31,7 @@ def _run_single(
     max_short: int,
     default_position_size: int,
     verbose: bool,
+    fractional_qty: bool = False,
 ) -> tuple[List[float], List[Any], PerformanceAnalyzer]:
     order_book = OrderBook()
     order_manager = OrderManager(
@@ -47,22 +49,27 @@ def _run_single(
         logger=None,
         default_position_size=default_position_size,
         verbose=verbose,
+        fractional_qty=fractional_qty,
     )
     equity_df = bt.run()
+    equity_clean = equity_df["equity"].dropna().tolist()
     analyzer = PerformanceAnalyzer(
-        equity_df["equity"].tolist(),
+        equity_clean,
         bt.trades,
     )
-    return equity_df["equity"].tolist(), bt.trades, analyzer
+    return equity_clean, bt.trades, analyzer
 
 
 def _collect_metrics(analyzer: PerformanceAnalyzer, trades: List[Any]) -> Dict[str, float]:
+    filled = [t.qty for t in trades if t.qty > 0]
+    avg_pos = float(np.mean(filled)) if filled else 0.0
     return {
         "pnl": analyzer.pnl(),
         "sharpe": analyzer.sharpe(),
         "max_drawdown": analyzer.max_drawdown(),
         "win_rate": analyzer.win_rate(),
         "trade_count": sum(1 for t in trades if t.qty > 0),
+        "avg_position_size": avg_pos,
     }
 
 
@@ -75,6 +82,7 @@ def run_execution_mc(
     max_short_position: int = 1_000,
     default_position_size: int = 10,
     verbose: bool = False,
+    fractional_qty: bool = False,
 ) -> Dict[str, Any]:
     """
     Monte Carlo over execution only: same price path (CSV), N runs.
@@ -86,12 +94,14 @@ def run_execution_mc(
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    keys = ["pnl", "sharpe", "max_drawdown", "win_rate", "trade_count"]
+    keys = ["pnl", "sharpe", "max_drawdown", "win_rate", "trade_count", "avg_position_size"]
     runs: Dict[str, List[float]] = {k: [] for k in keys}
+    equity_curves: List[List[float]] = []
 
-    for _ in range(n_runs):
+    for i in range(n_runs):
+        print(f"\r  Execution MC: run {i + 1}/{n_runs}", end="", flush=True)
         gateway = MarketDataGateway(csv_path)
-        _, trades, analyzer = _run_single(
+        equity, trades, analyzer = _run_single(
             gateway=gateway,
             strategy=strategy,
             capital=capital,
@@ -99,10 +109,13 @@ def run_execution_mc(
             max_short=max_short_position,
             default_position_size=default_position_size,
             verbose=verbose,
+            fractional_qty=fractional_qty,
         )
+        equity_curves.append(equity)
         m = _collect_metrics(analyzer, trades)
         for k in keys:
             runs[k].append(m[k])
+    print()
 
     summary: Dict[str, Dict[str, float]] = {}
     for k in keys:
@@ -120,6 +133,7 @@ def run_execution_mc(
     return {
         "runs": runs,
         "summary": summary,
+        "equity_curves": equity_curves,
         "n_runs": n_runs,
         "mode": "execution",
     }
@@ -140,6 +154,7 @@ def run_price_path_mc(
     default_position_size: int = 10,
     seed_base: Optional[int] = None,
     verbose: bool = False,
+    fractional_qty: bool = False,
 ) -> Dict[str, Any]:
     """
     Monte Carlo over synthetic price paths (GBM). Each path uses a different
@@ -152,6 +167,7 @@ def run_price_path_mc(
     rng = np.random.default_rng(seed_base)
 
     for i in range(n_paths):
+        print(f"\r  Price-path MC: path {i + 1}/{n_paths}", end="", flush=True)
         seed = int(rng.integers(0, 2**31)) if seed_base is not None else None
         gateway = SyntheticDataGateway(
             n_bars=n_bars,
@@ -171,10 +187,12 @@ def run_price_path_mc(
             max_short=max_short_position,
             default_position_size=default_position_size,
             verbose=verbose,
+            fractional_qty=fractional_qty,
         )
         m = _collect_metrics(analyzer, trades)
         for k in keys:
             runs[k].append(m[k])
+    print()
 
     summary: Dict[str, Dict[str, float]] = {}
     for k in keys:
@@ -217,7 +235,8 @@ def run_custom_mc(
     keys = ["pnl", "sharpe", "max_drawdown", "win_rate", "trade_count"]
     runs: Dict[str, List[float]] = {k: [] for k in keys}
 
-    for _ in range(n_runs):
+    for i in range(n_runs):
+        print(f"\r  Custom MC: run {i + 1}/{n_runs}", end="", flush=True)
         gateway = gateway_factory()
         _, trades, analyzer = _run_single(
             gateway=gateway,
@@ -231,6 +250,7 @@ def run_custom_mc(
         m = _collect_metrics(analyzer, trades)
         for k in keys:
             runs[k].append(m[k])
+    print()
 
     summary: Dict[str, Dict[str, float]] = {}
     for k in keys:
@@ -268,3 +288,40 @@ def print_mc_summary(result: Dict[str, Any], title: Optional[str] = None) -> Non
               f"min={s['min']:.4f}  max={s['max']:.4f}  "
               f"p5={s['p5']:.4f}  p50={s['p50']:.4f}  p95={s['p95']:.4f}")
     print()
+
+
+def plot_mc_equity(result: Dict[str, Any], title: Optional[str] = None, save_path: Optional[Path] = None) -> None:
+    """Plot every equity curve from a Monte Carlo result."""
+    curves = result.get("equity_curves", [])
+    if not curves:
+        print("No equity curves to plot.")
+        return
+
+    n = len(curves)
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    for i, curve in enumerate(curves):
+        ax.plot(curve, alpha=0.25, linewidth=0.8, color="steelblue")
+
+    # Compute and plot the mean equity curve (use shortest length for alignment)
+    min_len = min(len(c) for c in curves)
+    aligned = np.array([c[:min_len] for c in curves])
+    mean_curve = aligned.mean(axis=0)
+    p5_curve = np.percentile(aligned, 5, axis=0)
+    p95_curve = np.percentile(aligned, 95, axis=0)
+
+    ax.plot(mean_curve, color="navy", linewidth=2, label="Mean")
+    ax.fill_between(range(min_len), p5_curve, p95_curve, alpha=0.15, color="navy", label="5th–95th pctl")
+
+    ax.set_title(title or f"Monte Carlo Equity Curves ({n} runs)")
+    ax.set_xlabel("Bar")
+    ax.set_ylabel("Portfolio Value")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"Plot saved to {save_path}")
+    else:
+        plt.show()

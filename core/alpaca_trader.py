@@ -176,12 +176,17 @@ class AlpacaTrader:
         qty = float(qty_value) if pd.notna(qty_value) else 0.0
         if qty <= 0:
             return None, "target_qty is zero"
-        if self.asset_class == "crypto":
-            # Interpret target_qty as USD notional for crypto and convert to units.
+
+        # Convert target_qty to tradeable units.
+        # Strategies with target_qty_is_notional=True output USD notional;
+        # crypto strategies always output USD notional by convention.
+        is_notional = getattr(self.strategy, "target_qty_is_notional", False)
+        if self.asset_class == "crypto" or is_notional:
             qty = qty / price_for_qty
-            qty = math.floor(qty * 1_000_000) / 1_000_000
+            if self.asset_class == "crypto":
+                qty = math.floor(qty * 1_000_000) / 1_000_000
             if qty <= 0:
-                return None, "target_qty too small for crypto price"
+                return None, "target_qty too small after notional conversion"
 
         if signal != 0:
             side = "buy" if signal > 0 else "sell"

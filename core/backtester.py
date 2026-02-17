@@ -22,7 +22,7 @@ class TradeRecord:
     timestamp: pd.Timestamp
     side: str
     price: float
-    qty: int
+    qty: float
     status: str
     pnl: float
 
@@ -41,8 +41,9 @@ class Backtester:
         order_book: OrderBook,
         matching_engine: MatchingEngine,
         logger: Optional[OrderLoggingGateway] = None,
-        default_position_size: int = 10,
+        default_position_size: float = 10.0,
         verbose: bool = True,
+        fractional_qty: bool = False,
     ):
         self.data_gateway = data_gateway
         self.strategy = strategy
@@ -52,11 +53,12 @@ class Backtester:
         self.logger = logger
         self.default_position_size = default_position_size
         self.verbose = verbose
+        self.fractional_qty = fractional_qty
 
         self.market_history: List[Dict] = []
         self.equity_curve: List[float] = []
         self.cash_history: List[float] = []
-        self.position_history: List[int] = []
+        self.position_history: List[float] = []
         self.trades: List[TradeRecord] = []
 
         self._order_counter = 0
@@ -76,7 +78,7 @@ class Backtester:
         self._order_counter += 1
         return order_id
 
-    def _create_order(self, signal: int, price: float, timestamp: pd.Timestamp, qty: int) -> Order:
+    def _create_order(self, signal: int, price: float, timestamp: pd.Timestamp, qty: float) -> Order:
         return Order(
             order_id=self._next_order_id(),
             side="buy" if signal > 0 else "sell",
@@ -131,7 +133,7 @@ class Backtester:
     def _print_trade(
         self,
         order: Order,
-        filled_qty: int,
+        filled_qty: float,
         price: float,
         timestamp: pd.Timestamp,
         status: str,
@@ -141,8 +143,9 @@ class Backtester:
         symbol = getattr(self.data_gateway, "symbol", "ASSET")
         net_pnl = self.order_manager.portfolio_value(price) - self.order_manager.initial_capital
         side = order.side.upper()
+        qty_display = f"{filled_qty:.6f}".rstrip("0").rstrip(".") if filled_qty < 1 else f"{filled_qty:.2f}"
         print(
-            f"{timestamp:%Y-%m-%d %H:%M:%S} | {side} {filled_qty} {symbol} @ {price:.2f} "
+            f"{timestamp:%Y-%m-%d %H:%M:%S} | {side} {qty_display} {symbol} @ {price:.2f} "
             f"| status={status} | net_pnl={net_pnl:+.2f}"
         )
 
@@ -225,12 +228,12 @@ class Backtester:
 
                 if bid_active and pd.notna(bid_price):
                     bid_qty_val = latest.get("bid_qty", self.default_position_size)
-                    bid_qty = int(bid_qty_val) if pd.notna(bid_qty_val) and bid_qty_val > 0 else self.default_position_size
+                    bid_qty = int(bid_qty_val) if pd.notna(bid_qty_val) and bid_qty_val > 0 else int(self.default_position_size)
                     orders_to_submit.append((1, float(bid_price), bid_qty))
 
                 if ask_active and pd.notna(ask_price):
                     ask_qty_val = latest.get("ask_qty", self.default_position_size)
-                    ask_qty = int(ask_qty_val) if pd.notna(ask_qty_val) and ask_qty_val > 0 else self.default_position_size
+                    ask_qty = int(ask_qty_val) if pd.notna(ask_qty_val) and ask_qty_val > 0 else int(self.default_position_size)
                     orders_to_submit.append((-1, float(ask_price), ask_qty))
 
                 for sig, px, qty in orders_to_submit:
@@ -254,7 +257,19 @@ class Backtester:
             limit_price = latest.get("limit_price", latest["Close"])
             price = float(limit_price) if pd.notna(limit_price) else float(latest["Close"])
             qty_value = latest.get("target_qty", self.default_position_size)
-            qty = int(qty_value) if pd.notna(qty_value) and qty_value > 0 else self.default_position_size
+            is_notional = getattr(self.strategy, "target_qty_is_notional", False)
+            if pd.notna(qty_value) and qty_value > 0:
+                if is_notional and price > 0:
+                    if self.fractional_qty:
+                        qty = round(qty_value / price, 6)
+                    else:
+                        qty = int(qty_value / price)
+                else:
+                    qty = int(qty_value)
+            else:
+                qty = int(self.default_position_size)
+            if qty <= 0:
+                continue
 
             order = self._create_order(signal, price, timestamp, qty)
             valid, reason = self.order_manager.validate(order)
