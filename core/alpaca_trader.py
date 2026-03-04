@@ -147,6 +147,59 @@ class AlpacaTrader:
             return f"{qty:.6f}".rstrip("0").rstrip(".")
         return str(int(qty))
 
+    def _log_indicators(self, latest: pd.Series, signals_df: pd.DataFrame = None) -> None:
+        """Log current ATR, breakout bands, Kelly/adaptive indicators, and recent closes."""
+        parts = [f"{self.display_symbol}"]
+
+        bar_time = latest.get("Datetime")
+        if bar_time is not None and pd.notna(bar_time):
+            parts.append(f"bar_time={bar_time}")
+
+        price = latest.get("Close")
+        if pd.notna(price):
+            parts.append(f"price={float(price):.2f}")
+
+        atr = latest.get("ATR")
+        if pd.notna(atr):
+            parts.append(f"ATR={float(atr):.4f}")
+
+        upper = latest.get("ATR_upper_breakout")
+        if pd.notna(upper):
+            parts.append(f"upper={float(upper):.2f}")
+
+        lower = latest.get("ATR_lower_breakout")
+        if pd.notna(lower):
+            parts.append(f"lower={float(lower):.2f}")
+
+        dyn_mult = latest.get("dynamic_mult")
+        if pd.notna(dyn_mult) if dyn_mult is not None else False:
+            parts.append(f"dyn_mult={float(dyn_mult):.3f}")
+
+        kelly = latest.get("kelly_frac")
+        if pd.notna(kelly) if kelly is not None else False:
+            parts.append(f"kelly={float(kelly):.4f}")
+
+        signal = latest.get("signal", 0)
+        sig = int(signal) if pd.notna(signal) else 0
+        parts.append(f"signal={sig}")
+
+        logger.info(" | ".join(parts))
+
+        # Log last 5 closes
+        if signals_df is not None and "Close" in signals_df.columns:
+            recent = signals_df[["Close"]].tail(5)
+            if "Datetime" in signals_df.columns:
+                recent = signals_df[["Datetime", "Close"]].tail(5)
+            closes = []
+            for _, row in recent.iterrows():
+                dt = row.get("Datetime", "")
+                c = row["Close"]
+                if pd.notna(dt) and dt != "":
+                    closes.append(f"{dt} -> {float(c):.2f}")
+                else:
+                    closes.append(f"{float(c):.2f}")
+            logger.info(f"  Recent closes: {' | '.join(closes)}")
+
     def _build_decision(self, df: pd.DataFrame) -> Tuple[Optional[TradeDecision], Optional[str]]:
         if df is None or df.empty:
             return None, "no market data returned"
@@ -155,6 +208,9 @@ class AlpacaTrader:
         if signals_df.empty:
             return None, "strategy returned no rows"
         latest = signals_df.iloc[-1]
+
+        # Log current strategy indicators
+        self._log_indicators(latest, signals_df)
         signal_value = latest.get("signal", 0)
         signal = int(signal_value) if pd.notna(signal_value) else 0
         position_value = latest.get("position", None)
@@ -199,20 +255,33 @@ class AlpacaTrader:
             None,
         )
 
+    def _pending_order_qty(self) -> float:
+        """Sum of qty from open (unfilled) orders — positive for buys, negative for sells."""
+        orders = self.api.list_orders(status="open", symbols=[self.symbol])
+        total = 0.0
+        for o in orders:
+            q = float(o.qty)
+            if o.side == "sell":
+                q = -q
+            total += q
+        return total
+
     def _adjust_qty_for_position(
         self, decision: TradeDecision, net_position: float
     ) -> Tuple[float, Optional[str]]:
         qty = decision.qty
 
-        # Simple logic: just trade the requested quantity
+        # Include pending (unfilled) orders in the effective position
+        effective_position = net_position + self._pending_order_qty()
+
         # Skip if we'd be doubling down in same direction
-        if decision.side == "buy" and net_position > 0:
-            return 0.0, "already long"
-        if decision.side == "sell" and net_position < 0:
-            return 0.0, "already short"
+        if decision.side == "buy" and effective_position > 0:
+            return 0.0, "already long (including pending orders)"
+        if decision.side == "sell" and effective_position < 0:
+            return 0.0, "already short (including pending orders)"
 
         # For crypto, don't allow shorting
-        if self.asset_class == "crypto" and decision.side == "sell" and net_position <= 0:
+        if self.asset_class == "crypto" and decision.side == "sell" and effective_position <= 0:
             return 0.0, "crypto shorting disabled"
 
         if self.asset_class == "stock":
@@ -321,6 +390,39 @@ class AlpacaTrader:
             return df
         self._print_trade(decision, qty, order_id or "unknown")
         return df
+
+    def close_position(self) -> bool:
+        """Close any open position for this symbol using Alpaca's close_position API."""
+        try:
+            position = self.api.get_position(self.symbol)
+        except APIError as exc:
+            if getattr(exc, "status_code", None) == 404:
+                logger.info(f"No open position for {self.display_symbol} — nothing to close.")
+                return False
+            raise
+
+        pos_qty = float(position.qty)
+        pos_side = getattr(position, "side", "long")
+        logger.info(f"Current position: {pos_side} {pos_qty} {self.display_symbol}")
+
+        if pos_qty == 0:
+            logger.info(f"No open position for {self.display_symbol} — nothing to close.")
+            return False
+
+        if self.dry_run:
+            logger.info(f"[DRY RUN] Would close {pos_side} {pos_qty} {self.display_symbol}")
+            return True
+
+        try:
+            order = self.api.close_position(self.symbol)
+            logger.info(
+                f"Closed position: {pos_side} {pos_qty} {self.display_symbol} "
+                f"| order_id={order.id}"
+            )
+            return True
+        except APIError as exc:
+            logger.error(f"Failed to close {self.display_symbol}: {exc}")
+            return False
 
     def run(self, iterations: int = 1, sleep_seconds: int = 60) -> None:
         for i in range(iterations):

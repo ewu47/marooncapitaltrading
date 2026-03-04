@@ -96,6 +96,7 @@ Examples:
     parser.add_argument("--live", action="store_true", help="Run continuously until Ctrl+C")
     parser.add_argument("--save-data", action="store_true", help="Save raw+clean CSVs to data/")
     parser.add_argument("--dry-run", action="store_true", help="Print decisions without placing orders")
+    parser.add_argument("--flatten-on-exit", action="store_true", help="Close all positions for this symbol on exit")
     parser.add_argument("--feed", default=None, help="Data feed (iex or sip for stocks)")
     parser.add_argument("--list-strategies", action="store_true", help="List available strategies and exit")
     return parser.parse_args()
@@ -227,14 +228,22 @@ def main() -> None:
         logger.info("=" * 60)
         logger.info("Logs: logs/trades.csv, logs/system.log")
 
+    def flatten_if_requested() -> None:
+        if args.flatten_on_exit:
+            logger.info("Flattening position before exit...")
+            trader.close_position()
+
     if args.live:
         logger.info(f"Running continuously (Ctrl+C to stop). Sleep: {args.sleep}s between iterations.")
+        if args.flatten_on_exit:
+            logger.info("Will close positions on exit (--flatten-on-exit).")
         try:
             while True:
                 handle_iteration()
                 time.sleep(args.sleep)
         except KeyboardInterrupt:
             logger.info("Received stop signal.")
+            flatten_if_requested()
             print_summary()
     else:
         logger.info(f"Running {args.iterations} iteration(s)...")
@@ -242,6 +251,7 @@ def main() -> None:
             handle_iteration()
             if i < args.iterations - 1:
                 time.sleep(args.sleep)
+        flatten_if_requested()
         print_summary()
 
 

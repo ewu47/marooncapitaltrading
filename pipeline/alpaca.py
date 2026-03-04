@@ -133,20 +133,17 @@ def fetch_stock_bars(
     api = api or get_rest()
     feed = feed or os.environ.get("ALPACA_DATA_FEED", DEFAULT_DATA_FEED)
     tf = _parse_timeframe(timeframe)
-    bars = api.get_bars(symbol, tf, limit=limit, feed=feed).df
+    end = pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(days=fallback_days)
+    bars = api.get_bars(
+        symbol,
+        tf,
+        start=_to_rfc3339(start),
+        end=_to_rfc3339(end),
+        limit=limit,
+        feed=feed,
+    ).df
     df = _normalize_bars(bars, symbol)
-    if df.empty and fallback_days > 0:
-        end = pd.Timestamp.now(tz="UTC")
-        start = end - pd.Timedelta(days=fallback_days)
-        bars = api.get_bars(
-            symbol,
-            tf,
-            start=_to_rfc3339(start),
-            end=_to_rfc3339(end),
-            limit=limit,
-            feed=feed,
-        ).df
-        df = _normalize_bars(bars, symbol)
     if df.empty:
         raise ValueError(
             f"No stock bars returned for {symbol}. Market may be closed. "
@@ -164,22 +161,18 @@ def fetch_crypto_bars(
 ) -> pd.DataFrame:
     api = api or get_rest()
     tf = _parse_timeframe(timeframe)
-    if hasattr(api, "get_crypto_bars"):
-        bars = api.get_crypto_bars(symbol, tf, limit=limit).df
-    else:
+    if not hasattr(api, "get_crypto_bars"):
         raise RuntimeError("alpaca_trade_api does not support get_crypto_bars in this version.")
+    end = pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(days=fallback_days)
+    bars = api.get_crypto_bars(
+        symbol,
+        tf,
+        start=_to_rfc3339(start),
+        end=_to_rfc3339(end),
+        limit=limit,
+    ).df
     df = _normalize_bars(bars, symbol)
-    if df.empty and fallback_days > 0:
-        end = pd.Timestamp.now(tz="UTC")
-        start = end - pd.Timedelta(days=fallback_days)
-        bars = api.get_crypto_bars(
-            symbol,
-            tf,
-            start=_to_rfc3339(start),
-            end=_to_rfc3339(end),
-            limit=limit,
-        ).df
-        df = _normalize_bars(bars, symbol)
     if df.empty:
         raise ValueError(f"No crypto bars returned for {symbol}.")
     return df
